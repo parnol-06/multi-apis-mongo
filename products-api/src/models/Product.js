@@ -1,4 +1,4 @@
-// src/models/Product.js
+/// src/models/Product.js
 import { Schema, model } from "mongoose";
 
 const productSchema = new Schema(
