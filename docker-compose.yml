@@ -1,42 +1,58 @@
-version: "3.9"
+name: Build & Push all services to ACR (monorepo)
 
-services:
-  users-api:
-    build: ./users-api
-    container_name: users-api
-    environment:
-      - PORT=4001
-      - SERVICE_NAME=users-api
-      - DATABASE_URL=${USERS_DATABASE_URL}
-    ports:
-      - "4001:4001"
-    restart: unless-stopped
+on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "users-api/"
+      - "products-api/"
+      - "client/"
+      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
 
-  products-api:
-    build: ./products-api
-    container_name: products-api
-    environment:
-      - PORT=4002
-      - SERVICE_NAME=products-api
-      # CCompose resuelve por nombre de servicio: http://users-api:4001
-      - USERS_API_URL=http://users-api:4001
-      - MONGO_URI=${MONGO_URI}
-    ports:
-      - "4002:4002"
-    depends_on:
-      - users-api
-    restart: unless-stopped
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
 
-  client:
-    build: ./client
-    container_name: react-client
-    environment:
-      # Variables para conectar el cliente React a las APIs internas del compose
-      - REACT_APP_USERS_API=http://users-api:4001
-      - REACT_APP_PRODUCTS_API=http://products-api:4002
-    ports:
-      - "3000:80"
-    depends_on:
-      - users-api
-      - products-api
-    restart: unless-stopped
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: users-api
+            context: users-api
+            image: users-api
+          - service: products-api
+            context: products-api
+            image: products-api
+          - service: client
+            context: client
+            image: client
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔐 Azure Login (Service Principal)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 🔑 Login to Azure Container Registry
+        uses: azure/docker-login@v1
+        with:
+          login-server: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 🏷 Set version tag (short SHA)
+        id: vars
+        run: echo "TAG=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: 🏗 Build & Push ${{ matrix.service }}
+        run: |
+          echo "🔨 Building ${{ matrix.image }}..."
+          docker build -t ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.image }}:latest ${{ matrix.context }}
+          docker tag  ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.image }}:latest ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ steps.vars.outputs.TAG }}
+          echo "🚀 Pushing ${{ matrix.image }} to ACR..."
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.image }}:latest
+          docker push ${{ secrets.ACR_LOGIN_SERVER }}/${{ matrix.image }}:${{ steps.vars.outputs.TAG }}
