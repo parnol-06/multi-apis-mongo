@@ -26,3 +26,17 @@ services:
     depends_on:
       - users-api
     restart: unless-stopped
+
+  client:
+    build: ./client
+    container_name: react-client
+    environment:
+      # Variables para conectar el cliente React a las APIs internas del compose
+      - REACT_APP_USERS_API=http://users-api:4001
+      - REACT_APP_PRODUCTS_API=http://products-api:4002
+    ports:
+      - "3000:80"
+    depends_on:
+      - users-api
+      - products-api
+    restart: unless-stopped
